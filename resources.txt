@@ -1,0 +1,31 @@
+
+
+Books:
+
+
+Basics of Compiler Design
+-> http://hjemmesider.diku.dk/~torbenm/Basics/basics_lulu2.pdf
+
+A Simple Programming Language and Its Implementation
+-> file:///C:/Users/imcwhinnie/Downloads/bergstra_89_simple_programming.pdf
+-> https://dspace.library.uu.nl/bitstream/handle/1874/13977/bergstra_89_simple_programming.pdf?sequence=3
+
+Let Build A Compiler (unfinished)
+-> https://www.stack.nl/~marcov/compiler.pdf
+
+Websites:
+
+C in BNF
+-> https://cs.wmich.edu/~gupta/teaching/cs4850/sumII06/The%20syntax%20of%20C%20in%20Backus-Naur%20form.htm
+
+TutorialsPoint NASM
+-> https://www.tutorialspoint.com/assembly_programming/index.htm
+
+Compiler Comparer
+-> https://gcc.godbolt.org/
+
+Compiler Tutorial
+-> https://norasandler.com/2017/11/29/Write-a-Compiler.html
+
+Regex to DFA
+-> https://cyberzhg.github.io/toolbox/nfa2dfa
