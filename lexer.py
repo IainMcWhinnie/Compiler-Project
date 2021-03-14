@@ -8,6 +8,11 @@
 
 
 #-----------------------------------------------------------------------------------------------------------#
+
+# Import some tools for lexical parsing escaped characters
+import esc_tools
+
+
 # For each piece of programming syntax describe:
 # --> A regex expression
 # --> Key to pass on the parser (ID)
@@ -15,17 +20,36 @@
 
 #List of dictionaries
 
-language = [{'regex':'int|void',    'key':'TYPE'},
-            {'regex':'return',      'key':'RETURN'},
-            {'regex':';',           'key':'END STATEMENT'},
-            {'regex':'[(){}\\[\\]]',      'key':'BRACKETS'},
-            {'regex':'[0-9]+',      'key':'INTEGER'},
-            {'regex':'[a-zA-Z][a-zA-Z0-9]*', 'key':'IDENTIFIER'}
+language = [{'regex':'int|void',               'key':'TYPE'},
+            {'regex':'return',                 'key':'RETURN'},
+            {'regex':';',                      'key':'END STATEMENT'},
+            {'regex':'[\\(\\){}\\[\\]]',       'key':'BRACKETS'},
+            {'regex':'[0-9]+',                 'key':'INTEGER'},
+            {'regex':'[0-9]+.[0-9]+',          'key':'FLOAT'},
+            {'regex':'[a-zA-Z][a-zA-Z0-9]*',   'key':'IDENTIFIER'}
 ]
+
+##    0-9: $   a-z:%   A-Z: @
 
 lowercase_alphabet = list('abcdefghijklmnopqrstuvwxyz')
 uppercase_alphabet = list('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 digits = list('0123456789')
+
+# Compute the character set
+character_set = set()
+for expression in language:
+    # Expand the short hand notation
+    new_chars = expression['regex'].replace('0-9',''.join(digits)\
+                                    ).replace('a-z',''.join(lowercase_alphabet)\
+                                    ).replace('A-Z',''.join(uppercase_alphabet))
+    # get rid of symbols that are inherintly regex defined
+    for regex_symbol in '[]()+|*':
+        new_chars = esc_tools.replace_with_esc(new_chars, regex_symbol, '')
+
+    # add the new characters
+    for char in new_chars:
+        character_set.add(char)
+
 
 
 #-----------------------------------------------------------------------------------------------------------#
@@ -129,9 +153,7 @@ class Graph():
 # Create the placeholder for Epsilon values
 EPSILON = 'EPSILON'
 
-# Create the NFA graph
-NFA = Graph()
-
+ 
 
 #-----------------------------------------------------------------------------------------------------------#
 
@@ -143,14 +165,13 @@ NFA = Graph()
 # ab: Creates a chain link in the graph
 # a|b: Creates two paths which have each option
 # a*: Creates a loop back to initial node
-# a+: Creates a loop with extra link and a one way connection
+# a+: Creates a loop with extra link and a one way connection (so must run at least once)
 
 # Regex operators have a precedence
 # 0: Brackets
-# 1: * Operator 
-# 2: + Operator 
-# 3: Concatenation  
-# 4: | Operator
+# 1: *,+ Operator
+# 2: Concatenation  
+# 3: | Operator
 
 # However our Regex expressions use more complex operators to simplify
 # what would be complicated regex expressions
@@ -170,13 +191,7 @@ def reduce_regex(exp):
     # We need to be careful to avoid square brackets that have been escaped in the regex strings
 
     # Get index of the first closing bracket ']'
-    end_brck_inx = exp.find(']')
-    while end_brck_inx != -1: # While a bracket is still findable
-        if exp[end_brck_inx-1] == '\\': # If the bracket character is escaped
-            end_brck_inx = exp.find(']', end_brck_inx) # Try again
-        else:
-            # The bracket exist and is not escaped so is the correct one so stop iteration
-            break
+    end_brck_inx = esc_tools.find_with_esc(exp, ']')
 
     # First the base case where the regex has no brackets
     if end_brck_inx == -1:
@@ -187,13 +202,7 @@ def reduce_regex(exp):
     front_end = exp[:end_brck_inx]
     
     # Now we should search the front end for the last opening bracket to get a pair
-    strt_brck_inx = front_end.rfind('[')
-    while strt_brck_inx != -1: # While a bracket is still findable
-        if front_end[strt_brck_inx-1] == '\\': # If the bracket character is escaped
-            strt_brck_inx = front_end.find('[', 0, strt_brck_inx) # Try again with end set to the previous index
-        else:
-            # The bracket exist and is not escaped so is the correct one so stop iteration
-            break
+    strt_brck_inx = esc_tools.rfind_with_esc(front_end, '[')
 
     # Now we can get three pieces
     inside_exp = front_end[strt_brck_inx+1:]
@@ -259,9 +268,13 @@ def reduce_regex(exp):
 # Input node name
 # Output node name
 
+
 def regex_to_NFA(exp, graph, input_node, end_node):
     # First we need to clean our regex to get rid of complicated syntax
+
+    #print('Cleaning complex syntax:')
     exp = reduce_regex(exp)
+    #print('\tNew_exp:',exp)
     
     # Now we should ommit the brackets in our answer for recursive parsing
     # We should iterate over the exp and split the string at the highest level
@@ -272,9 +285,7 @@ def regex_to_NFA(exp, graph, input_node, end_node):
     # and collect the nested bracket contents in an array
     brckt_conts = []
 
-    i = exp.find('(') # find the first starting bracket
-    while i > 0 and exp[i-1] == '\\': # if the character is escaped
-        i = exp.find('(', i+1) # try again
+    i = esc_tools.find_with_esc(exp, '(') # find the first starting bracket
 
     nesting_level = 0 # how many brackets have we already seen
 
@@ -310,25 +321,19 @@ def regex_to_NFA(exp, graph, input_node, end_node):
             # add the contents to the contents string
             brckt_contents += exp[i]
             
-            
             i += 1 # increment i
-
-            #print('Checking ', exp[i], nesting_level)
 
         brckt_conts.append(brckt_contents) # add the contents of the bracket to the list
 
-        # delete the contents of the bracket from the exp string and replace them with hashes eg (#####)
-        # this operation preserves the length of the string which is important for the function to work
-        exp = exp[:starting_i+1] + '#'*len(brckt_contents) + exp[i:]
+        # delete the contents of the bracket from the exp string (Notice this changes the index i)
+        exp = exp[:starting_i+1] + exp[i:]
+        # the position i refered to in the old exp can now be indexed by starting_i+1
 
-        i = exp.find('(',i) # now we find the next opening bracket to repeat the process
-        while i > 0 and exp[i-1] == '\\': # if the character is escaped
-            i = exp.find('(', i+1) # try again
-    
-    exp = exp.replace('#','') # get rid of the hash symbols
-    ## FIX FOR ESCAPED CHARACTERS
+        i = esc_tools.find_with_esc(exp, '(',starting_i+1) # now we find the next opening bracket to repeat the process
+        
 
-    print('A list of the bracket contents:',brckt_conts,'\nExp:',exp)
+    #print('Handling brackets')
+    #print('\tNew exp:',exp,'\n\tBracket contents:',brckt_conts)
 
     # Now we start by dividing the expression into the lowest precedence operator |
     # We treat the empty bracket pairs () as single elements and retrieve their contents
@@ -336,75 +341,340 @@ def regex_to_NFA(exp, graph, input_node, end_node):
 
     # From the input node we create as many branches as there is options
 
-    # FIX FOR ESCAPED CHARACTERS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    options = exp.split('|')
+    #print('Parsing Branches')
 
+    # Create an array called options for each part split by | with escapement handling
+    options = esc_tools.split_with_esc(exp, '|')
+    #print('Options: ',options, exp)
+
+    # now parse each branch individually
     for branch in options:
-        print('Creating a branch for ',branch)
-        # First we create a node for each option
-        node = graph.add_node()
-         
-        # Then we add an edge to the node from the input with the value EPSILON
-        graph.add_edge(input_node, node, EPSILON)
-
-        # Now we can parse from the highest precence in each  (*, +, concat)
+        #print('\tCreating a branch for ',branch)
+        
+        # We can parse from the highest precence in each  (*, +, concat)
 
         # first we should implement the recursive base case where the regex is 1 character
         # and the case where the regex is just brackets
 
+
+
         if len(branch) == 1:
             # The regex is just one character
+            # First we create a node for the option
+            node = graph.add_node()
+            # Then we add an edge to the node from the input with the value EPSILON
+            graph.add_edge(input_node, node, EPSILON)
+            # Then connect the node to the output
             graph.add_edge(node, end_node, branch)
+
+
+
+
         elif branch == '()':
             # The regex is our empty bracket notation so we pop the contents from brckt_conts list
             # first in first out so take from the start
             contents = brckt_conts.pop(0)
-            regex_to_NFA(contents, graph, node, end_node)
+            # recursively call the regex_to_NFA function
+            regex_to_NFA(contents, graph, input_node, end_node)
+
+
+
+
         elif len(branch) == 2 and branch[0] == '\\':
             # The regex is a single escaped character
+            # First we create a node for the option
+            node = graph.add_node()
+            # Then we add an edge to the node from the input with the value EPSILON
+            graph.add_edge(input_node, node, EPSILON)
+            # Then connect the node to the output
             graph.add_edge(node, end_node, branch)
+
+
+
+
         else:
             # The regex statement either has more than one character or uses +,* operators
-            # First create a list of elements in concatentation bound by +,*
-            parts = []
-            i = 0 # We iterate through with a while since we do not know how many elements
-            current_elm = ''
-            while i < len(branch):
-                if i != 0 and branch[i] == '+' or branch[i] == '*' and branch[i-1] != '\\':
-                    # Check for unescaped operators
-                    current_elm += branch[i]
-                elif branch[i] == '\\':
-                    # The current char together with the next one form an escaped character
-                    # Add the previous item
-                    if i != 0:
-                        parts.append(current_elm)
-                    # Add the escaped char to the cur item buffer
-                    assert i+1 < len(branch), 'Esacpement used without character'
-                    current_elm = branch[i]+branch[i+1]
-                    i += 1 # we will end up incrementing i by 2 in this loop
-                else:
-                    # The current index is the start of a new item
-                    # Add the previous item
-                    parts.append(current_elm)
-                    # Restart the current_elm buffer
-                    current_elm = branch[i]
 
-                i += 1
+            # Handle the case where the statement is a single (escaped?) character or brackets
+            # that has + and * operations applied
+            # Note that * overrules + and that nested + or * are the same as 1
 
-            parts.append(current_elm) # Append the last item (not done by while loop)
+            root = esc_tools.replace_with_esc(esc_tools.replace_with_esc(branch, '*',''),'+','')
+            if len(root) == 1 or root == '()' or root[0]=='\\':
+                extensions = esc_tools.replace_with_esc(branch, root, '')
+                #print('\tNo concatenation!', extensions)
+                # Two cases
+                # Contains * or contains both
+                # Contains +
+                # Cant contain neither because the previous else clauses should handle that
 
-            print(parts)
+                if '*' in extensions:
+                    # Contains * or contains both
+                    #print('\tMultiple')
+                    # Implemented by a loop back to a node
+                    # First of all create the node that the loop exits and returns to
+                    loop_node = graph.add_node()
+                    # Then add this node as an option for the branch
+                    # Join to input and output with EPSILON
+                    graph.add_edge(input_node, loop_node, EPSILON)
+                    graph.add_edge(loop_node, end_node, EPSILON)
+
+                    # Now recursively call this function on the root part passing both the input and output 
+                    # as our loop node to create a loop
+
+                    # first check whether we need to get contents from brackets
+                    if root == '()':
+                        root = brckt_conts.pop(0) # remove from start of bracket list
                     
+                    regex_to_NFA(root, graph, loop_node, loop_node)
 
-    
+                else:
+                    # Contains +
+                    #print('\tAt least one')
+                    # Implemented by two loop nodes that are joined with a link going backwards
+                    # and the loop body defined by root
+                    first_loop_node = graph.add_node()
+                    scnd_loop_node = graph.add_node()
+                    # connect the first node to the input
+                    graph.add_edge(input_node, first_loop_node, EPSILON)
+                    # add the backwards link
+                    graph.add_edge(scnd_loop_node, first_loop_node, EPSILON)
+                    # connect the second node to the output
+                    graph.add_edge(scnd_loop_node, end_node, EPSILON)
 
+                    # The loop body will again be a recursive call to this function passing the input as
+                    # out first loop node and the output as our scnd loop node
+
+                    # first check whether we need to get contents from brackets
+                    if root == '()':
+                        root = brckt_conts.pop(0) # remove from start of bracket list
+                    
+                    regex_to_NFA(root, graph, first_loop_node, scnd_loop_node)
+
+
+
+
+            else:
+                # In this case the branch is a string of concatenated statements with each
+                # item possibly having *,+ operators on them
+                # All we need to do is seperate each item and recursively call this function
+                # on each
+
+                # First create a list of elements in concatentation bound by +,*
+
+                parts = []
+                i = 0 # We iterate through with a while since we do not know how many elements
+                current_elm = ''
+                escaped = False
+                ready = False
+
+                # fails on \\+*
+
+                for char in branch:
+
+                    if ready and not char in '+*': # If the substring is a complete item and the
+                                                   # current char is not a operator
+                        # The current index is the start of a new item
+                        # Add the previous item
+                        parts.append(current_elm)
+                        # Restart the current_elm buffer
+                        current_elm = ''
+                        ready = False
+
+                    if escaped: # If the character is escaped add it to the buffer string
+                        current_elm += char
+                        escaped = False
+                        ready = True
+
+                    elif char == '\\': # If the character is an unescaped backslash then
+                        current_elm += char # add the backslash to the buffer string
+                        escaped = True # set escaped to True
+
+                    else:
+                        if char != '(':
+                            ready = True
+                        current_elm += char
+
+                parts.append(current_elm) # Append the last item (not done by loop)
+
+                #print(parts)
+
+                # Now we have each part of the concatenation we just iterate through the graph
+                # in a chain like structure
+                # Each item gets a node with serves as its output and the next item's input
+                # apart from the last node which uses the original output
+
+                prev_output = input_node # first item gets the input node
+
+                for i,item in enumerate(parts):
+                    #print('\t\t Recursively call on ',item)
+
+                    # get the ouput node
+                    if i == len(parts)-1: # last node
+                        output = end_node # so output is the actual output node
+                    else:
+                        output = graph.add_node() # for ever other node just create a new node
+
+                    # recursively call the function with the item
+                    if '()' in item:
+                        # if item is brackets then get the contents from brck_conts
+                        # The regex is our empty bracket notation so we pop the contents from brckt_conts list
+                        # first in first out so take from the start
+                        item = item.replace('()', '('+brckt_conts.pop(0)+')')
+                    
+                    
+                    regex_to_NFA(item, graph, prev_output, output)
+
+                    # update prev_output
+                    prev_output = output
+                        
+
+# define a little function that creates an NFA given a regex expression
+# used for testing purposes
+
+def getNFA(regex):
+    x = Graph()
+    inputn = x.add_node()
+    outputn = x.add_node()
+    regex_to_NFA(regex, x, inputn, outputn)
+    return x
+
+#-----------------------------------------------------------------------------------------------------------#
+
+# Now we should turn our NFA into a DFA
+# Then reduce the DFA into a minimal DFA
+
+# Define a function epsilon_closure that returns the epsilon closure of list of points in a graph
+def epsilon_closure(graph, points):
     
+    # for each point in set_points get all the epsilon connections and add them to new_points
+    # Create a new set to be filled with connected points + original points
+    new_points = set(points)
+
+    for point in points:
+        for conn in graph.get_neighbours(point, EPSILON):
+            new_points.add(conn)
+        
+    # Now define a recursive base case
+    if new_points == points:
+        # There are no new points to be found so we have our solution
+        return new_points
+    else:
+        # Otherwise recursively call the function with the new points
+        return epsilon_closure(graph, new_points)
+
+def move(points, NFA, value):
+    # Given a set of possible points compute the next set of possible points
+    # for a traversal value
+    new_points = set()
+    for point in points:
+        for conn in NFA.get_neighbours(point, value):
+            new_points.add(conn)
+    return new_points
+
+
+def NFA_to_DFA(DFA, NFA, NFA_input_node):
+    
+    # The algorithm to create a DFA from an NFA involves traversing every path on the NFA at once
+    # taking the epsilon-closure at every stage.
+    # Example
+    # Starting with {0} the input node, take the epsilon-closure({0})
+    # Then for each character in the language calculate the set of points that can be reached
+    # Then take the epsilon closure of that and so on
+
+    # For each set of possible NFA positions create a DFA node referenced by a dictionary
+    # Dict:           set of NFA points       ---> DFA node
+    #            set_hash x where x is a set  --->   int
+    # Since sets are not hashable we define a function set_hash to turn them into unique hashable tuples
+
+    set_hash = lambda x: tuple(sorted(list(x)))
+
+    DFA_nodes = {}
+
+    # Create a stack of NFA possiblilities to compute further from
+    # Implement with a set of tuple(set())'s
+    # For every element in here, elm, tuple(elm) will be in DFA_nodes
+    compute_stack = set()
+
+
+    # We start with the input node to the NFA and its epsilon-closure
+    DFA_in = epsilon_closure(NFA, {NFA_input_node})
+    # Add it to the computation stack
+    compute_stack.add(set_hash(DFA_in))
+    # create a DFA node for the current NFA possibility
+    DFA_in_node = DFA.add_node()
+    # and add this node to the DFA node dictionary
+    DFA_nodes[set_hash(DFA_in)] = DFA_in_node
+
+
+    while len(compute_stack) != 0: # While the computation stack is not empty
+
+        # get a random possibility to compute its links
+        current_DFA_pos = set(compute_stack.pop())
+
+        # get the assigned node from the dict
+        current_DFA_node = DFA_nodes[set_hash(current_DFA_pos)]
+
+        #print('\nWe calculating with DFA_node ',current_DFA_node)
+
+        # For each of the characters in the character set calculate a possible NFA state
+        for character in character_set:
+
+            new_pos = epsilon_closure(NFA, move(current_DFA_pos, NFA, character))
+
+            if not new_pos == set(): # If the set is non empty
+                new_pos_tup = set_hash(new_pos)
+                if DFA_nodes.get(new_pos_tup, None) is None:
+                    #print('_'+character+'_', end='')
+                    # This possibility has never been seen before
+                    # Create a new DFA node to refer to it
+                    new_node = DFA.add_node()
+                    # and add it to the dictionary
+                    DFA_nodes[new_pos_tup] = new_node
+
+                    print(new_node, end='')
+
+                    # Now connect it to the node it was connected to
+                    DFA.add_edge(current_DFA_node, new_node, character)
+
+                    # Now add it to the computation stack so that its connections can be computed
+                    compute_stack.add(new_pos_tup)
+                else:
+                    #print(character, end='')
+                    # This node has been seen before so simply add a connection to it
+                    # Get the posibility that it points to by DFA_nodes
+                    points_to = DFA_nodes[new_pos_tup]
+                    DFA.add_edge(current_DFA_node, points_to, character)
+
+
+    return DFA_nodes
+
+
+
+
+
+#-----------------------------------------------------------------------------------------------------------#
+                 
 
 if __name__=='__main__':
+    # Create the NFA graph
+    NFA = Graph()
+
     input_node = NFA.add_node()
-    output_node = NFA.add_node()
-    regexParse = input('Regex to parse: ')
-    regex_to_NFA(regexParse, NFA, input_node, output_node)
-    print('Input Node: ',input_node)
-    print('Ouput Node: ',output_node)
-    print(NFA.graph)
+    
+    for expression in language:
+        print('Computing the NFA for',expression['regex'])
+        cur_output_node = NFA.add_node()
+        expression['output_node'] = cur_output_node
+        regex = expression['regex']
+        regex_to_NFA(regex, NFA, input_node, cur_output_node)
+
+    DFA = Graph()
+
+    print('NFA to DFA...')
+    print('Creating DFA nodes')
+    w = NFA_to_DFA(DFA, NFA, input_node)
+    print('')
+
+    
+    
